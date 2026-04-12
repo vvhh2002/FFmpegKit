@@ -18,6 +18,12 @@ let package = Package(
         .library(name: "Libavutil", targets: ["Libavutil"]),
         .library(name: "Libswresample", targets: ["Libswresample"]),
         .library(name: "Libswscale", targets: ["Libswscale"]),
+        // Crypto/TLS libraries exposed for consumers that link Libav*
+        // individually without the full FFmpegKit target
+        .library(name: "gmp", targets: ["gmp"]),
+        .library(name: "nettle", targets: ["nettle"]),
+        .library(name: "hogweed", targets: ["hogweed"]),
+        .library(name: "gnutls", targets: ["gnutls"]),
         .library(name: "libass", targets: ["libfreetype", "libfribidi", "libharfbuzz", "libass"]),
         .library(name: "libmpv", targets: ["FFmpegKit", "libass", "libmpv"]),
         .executable(name: "ffmpeg", targets: ["ffmpeg"]),
