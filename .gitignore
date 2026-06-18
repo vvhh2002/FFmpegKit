@@ -9,7 +9,6 @@ Demo/Pods
 
 # Build artifacts
 build*.log
-clone_dependencies.sh
 
 # XCFramework binaries (built separately)
 Sources/*.xcframework
