@@ -1,0 +1,4 @@
+module CSDL2 [system][extern_c] {
+    link "SDL2"
+    export *
+}
