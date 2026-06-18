@@ -641,13 +641,13 @@ class BaseBuild {
             try FileManager.default.createDirectory(at: versionsA + "Resources", withIntermediateDirectories: true, attributes: nil)
             try FileManager.default.moveItem(at: frameworkDir + "Info.plist", to: versionsA + "Resources/Info.plist")
             // Create symlinks at the root level
-            try FileManager.default.createSymbolicLink(at: frameworkDir + "Headers", withDestinationURL: versionsA + "Headers")
-            try FileManager.default.createSymbolicLink(at: frameworkDir + "Modules", withDestinationURL: versionsA + "Modules")
-            try FileManager.default.createSymbolicLink(at: frameworkDir + framework, withDestinationURL: versionsA + framework)
-            try FileManager.default.createSymbolicLink(at: frameworkDir + "Resources", withDestinationURL: versionsA + "Resources")
-            try FileManager.default.createSymbolicLink(at: frameworkDir + "Info.plist", withDestinationURL: versionsA + "Resources/Info.plist")
+            try FileManager.default.createSymbolicLink(atPath: (frameworkDir + "Headers").path, withDestinationPath: "Versions/A/Headers")
+            try FileManager.default.createSymbolicLink(atPath: (frameworkDir + "Modules").path, withDestinationPath: "Versions/A/Modules")
+            try FileManager.default.createSymbolicLink(atPath: (frameworkDir + framework).path, withDestinationPath: "Versions/A/\(framework)")
+            try FileManager.default.createSymbolicLink(atPath: (frameworkDir + "Resources").path, withDestinationPath: "Versions/A/Resources")
+            try FileManager.default.createSymbolicLink(atPath: (frameworkDir + "Info.plist").path, withDestinationPath: "Versions/A/Resources/Info.plist")
             // Create Versions/Current symlink pointing to A
-            try FileManager.default.createSymbolicLink(at: frameworkDir + "Versions/Current", withDestinationURL: versionsA)
+            try FileManager.default.createSymbolicLink(atPath: (frameworkDir + "Versions/Current").path, withDestinationPath: "A")
         }
         return frameworkDir.path
     }

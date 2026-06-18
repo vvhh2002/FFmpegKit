@@ -97,6 +97,9 @@ let package = Package(
             name: "ffmpeg",
             dependencies: [
                 "fftools",
+            ],
+            cSettings: [
+                .headerSearchPath("."),
             ]
         ),
         .target(

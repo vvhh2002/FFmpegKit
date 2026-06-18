@@ -122,6 +122,10 @@ class BuildFFMPEG: BaseBuild {
             try FileManager.default.copyItem(at: buildURL + "src/libavdevice/avdevice.h", to: fftoolsFile + "include/libavdevice/avdevice.h")
             try FileManager.default.copyItem(at: buildURL + "src/libavdevice/version_major.h", to: fftoolsFile + "include/libavdevice/version_major.h")
             try FileManager.default.copyItem(at: buildURL + "src/libavdevice/version.h", to: fftoolsFile + "include/libavdevice/version.h")
+            let stdbitHeader = buildURL + "src/compat/stdbit/stdbit.h"
+            if FileManager.default.fileExists(atPath: stdbitHeader.path) {
+                try FileManager.default.copyItem(at: stdbitHeader, to: fftoolsFile + "include/stdbit.h")
+            }
             let postprocSrc = buildURL + "src/libpostproc"
             if FileManager.default.fileExists(atPath: postprocSrc.path) {
                 if !FileManager.default.fileExists(atPath: (fftoolsFile + "include/libpostproc").path) {
@@ -146,9 +150,93 @@ class BuildFFMPEG: BaseBuild {
             try FileManager.default.createDirectory(at: ffmpegFile + "include", withIntermediateDirectories: true)
             let fftools = buildURL + "src/fftools"
             let fileNames = try FileManager.default.contentsOfDirectory(atPath: fftools.path)
+            func copyHeader(_ source: URL, named fileName: String, to directory: URL) throws {
+                try FileManager.default.copyItem(at: source, to: directory + fileName)
+            }
+            func copySharedDirectory(_ directoryName: String) throws {
+                let sourceDirectory = fftools + directoryName
+                guard FileManager.default.fileExists(atPath: sourceDirectory.path) else {
+                    return
+                }
+                let targetDirectory = fftoolsFile + directoryName
+                let publicDirectory = fftoolsFile + "include" + directoryName
+                try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: publicDirectory, withIntermediateDirectories: true)
+
+                for fileName in try FileManager.default.contentsOfDirectory(atPath: sourceDirectory.path) {
+                    let source = sourceDirectory + fileName
+                    if fileName.hasSuffix(".c") {
+                        try FileManager.default.copyItem(at: source, to: targetDirectory + fileName)
+                    } else if fileName.hasSuffix(".h") {
+                        try FileManager.default.copyItem(at: source, to: targetDirectory + fileName)
+                        try copyHeader(source, named: fileName, to: publicDirectory)
+                    }
+                }
+            }
+
+            func patchFFmpegToolIncludes(in file: URL) throws {
+                guard let data = FileManager.default.contents(atPath: file.path),
+                      var string = String(data: data, encoding: .utf8) else {
+                    return
+                }
+                string = string
+                    .replacingOccurrences(of: "\"fftools/ffmpeg.h\"", with: "\"ffmpeg.h\"")
+                    .replacingOccurrences(of: "\"fftools/ffmpeg_mux.h\"", with: "\"ffmpeg_mux.h\"")
+                    .replacingOccurrences(of: "\"fftools/textformat/", with: "\"textformat/")
+                    .replacingOccurrences(of: "\"fftools/resources/", with: "\"resources/")
+                try string.write(toFile: file.path, atomically: true, encoding: .utf8)
+            }
+
+            func patchFFplayRenderer(in file: URL) throws {
+                guard let data = FileManager.default.contents(atPath: file.path),
+                      var string = String(data: data, encoding: .utf8),
+                      string.contains("#if (SDL_VERSION_ATLEAST(2, 0, 6) && CONFIG_LIBPLACEBO)") else {
+                    return
+                }
+                string = string.replacingOccurrences(of: """
+                #if (SDL_VERSION_ATLEAST(2, 0, 6) && CONFIG_LIBPLACEBO)
+                """, with: """
+                #ifndef __has_include
+                #define __has_include(x) 0
+                #endif
+
+                #if __has_include(<vulkan/vulkan.h>)
+                #define FFPLAY_HAS_VULKAN_HEADERS 1
+                #else
+                #define FFPLAY_HAS_VULKAN_HEADERS 0
+                #endif
+
+                #if (SDL_VERSION_ATLEAST(2, 0, 6) && CONFIG_LIBPLACEBO && FFPLAY_HAS_VULKAN_HEADERS)
+                """)
+                try string.write(toFile: file.path, atomically: true, encoding: .utf8)
+            }
+
+            func copyFFmpegDirectory(_ directoryName: String, generatedSource: URL? = nil) throws {
+                let sourceDirectory = fftools + directoryName
+                guard FileManager.default.fileExists(atPath: sourceDirectory.path) else {
+                    return
+                }
+                let targetDirectory = ffmpegFile + directoryName
+                try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+
+                for fileName in try FileManager.default.contentsOfDirectory(atPath: sourceDirectory.path) where fileName.hasSuffix(".c") || fileName.hasSuffix(".h") {
+                    let target = targetDirectory + fileName
+                    try FileManager.default.copyItem(at: sourceDirectory + fileName, to: target)
+                    try patchFFmpegToolIncludes(in: target)
+                }
+                if let generatedSource, FileManager.default.fileExists(atPath: generatedSource.path) {
+                    for fileName in try FileManager.default.contentsOfDirectory(atPath: generatedSource.path) where fileName.hasSuffix(".c") {
+                        try FileManager.default.copyItem(at: generatedSource + fileName, to: targetDirectory + fileName)
+                    }
+                }
+            }
             for fileName in fileNames {
                 if fileName.hasPrefix("ffplay") {
-                    try FileManager.default.copyItem(at: fftools + fileName, to: ffplayFile + fileName)
+                    let target = ffplayFile + fileName
+                    try FileManager.default.copyItem(at: fftools + fileName, to: target)
+                    if fileName == "ffplay_renderer.c" {
+                        try patchFFplayRenderer(in: target)
+                    }
                 } else if fileName.hasPrefix("ffprobe") {
                     try FileManager.default.copyItem(at: fftools + fileName, to: ffprobeFile + fileName)
                 } else if fileName.hasPrefix("ffmpeg") {
@@ -163,6 +251,9 @@ class BuildFFMPEG: BaseBuild {
                     try FileManager.default.copyItem(at: fftools + fileName, to: fftoolsFile + fileName)
                 }
             }
+            try copySharedDirectory("textformat")
+            try copyFFmpegDirectory("graph")
+            try copyFFmpegDirectory("resources", generatedSource: buildURL + "fftools/resources")
             let prefix = scratch(platform: platform, arch: arch)
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: "/usr/local/bin/ffmpeg"))
             try? FileManager.default.copyItem(at: prefix + "ffmpeg", to: URL(fileURLWithPath: "/usr/local/bin/ffmpeg"))
