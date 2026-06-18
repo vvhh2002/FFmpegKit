@@ -1,4 +1,4 @@
-# FFmpegKit ![GitHub release](https://img.shields.io/badge/release-v8.1-blue.svg) ![CocoaPods](https://img.shields.io/cocoapods/v/ffmpeg-kit-ios-min) 
+# FFmpegKit ![GitHub release](https://img.shields.io/badge/release-v8.1-blue.svg)
 
 `FFmpegKit` is a collection of tools to use `FFmpeg` in `iOS`, `macOS`, `tvOS`, `xrOS`, `visionOS`  applications.
 
@@ -23,6 +23,10 @@ dependencies: [
 swift package --disable-sandbox BuildFFmpeg
 
 ```
+
+`BuildFFmpeg` is the supported way to reproduce the distributed `Sources/*.xcframework`
+artifacts used by `Package.swift` binary targets. CocoaPods podspecs are no longer
+distributed.
 
 ## Run ffmpeg ffprobe in code(Features of the lgpl version)
 
