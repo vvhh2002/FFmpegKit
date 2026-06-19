@@ -24,8 +24,13 @@ class BuildSmbclient: BaseBuild {
         return cFlags
     }
 
+    override func flagsDependencelibrarys() -> [Library] {
+        [.gmp, .nettle, .gnutls, .readline]
+    }
+
     override func environment(platform: PlatformType, arch: ArchType) -> [String: String] {
         var env = super.environment(platform: platform, arch: arch)
+        env["PATH"] = "/usr/local/opt/bison/bin:/opt/homebrew/opt/bison/bin:" + (env["PATH"] ?? "")
         env["PATH"]? += (":" + (URL.currentDirectory + "../Plugins/BuildFFmpeg/\(library.rawValue)/bin").path + ":" + (directoryURL + "buildtools/bin").path)
         env["PYTHONHASHSEED"] = "1"
         env["WAF_MAKE"] = "1"
@@ -50,6 +55,7 @@ class BuildSmbclient: BaseBuild {
             [
                 "--without-cluster-support",
                 "--disable-rpath",
+                "--without-pie",
                 "--without-ldap",
                 "--without-pam",
                 "--enable-fhs",
@@ -57,6 +63,7 @@ class BuildSmbclient: BaseBuild {
                 "--without-ads",
                 "--disable-avahi",
                 "--disable-cups",
+                "--disable-spotlight",
                 "--without-gettext",
                 "--without-ad-dc",
                 "--without-acl-support",
@@ -144,7 +151,7 @@ class BuildNettle: BaseBuild {
 
     override func environment(platform: PlatformType, arch: ArchType) -> [String: String] {
         var env = super.environment(platform: platform, arch: arch)
-        // Nettle 3.10 configure auto-detects -std=gnu23, but getopt.c has K&R declarations incompatible with C23
+        // Nettle configure may auto-detect -std=gnu23, but getopt.c has K&R declarations incompatible with C23.
         env["CFLAGS"] = (env["CFLAGS"] ?? "") + " -std=gnu11"
         return env
     }

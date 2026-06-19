@@ -1,6 +1,6 @@
 --- a/wscript
 +++ b/wscript
-@@ -191,7 +191,7 @@
+@@ -237,7 +237,7 @@
  
      conf.CHECK_CFG(package='zlib', minversion='1.2.3',
                     args='--cflags --libs',
@@ -8,4 +8,4 @@
 +                   mandatory=False)
      conf.CHECK_FUNCS_IN('inflateInit2', 'z')
  
-     if conf.CHECK_FOR_THIRD_PARTY():
+     if Options.options.enable_keyring is not False:

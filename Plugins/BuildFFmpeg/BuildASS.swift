@@ -26,10 +26,33 @@ class BuildHarfbuzz: BaseBuild {
         super.init(library: .libharfbuzz)
     }
 
+    override func flagsDependencelibrarys() -> [Library] {
+        [.libfreetype]
+    }
+
     override func arguments(platform _: PlatformType, arch _: ArchType) -> [String] {
         [
             "-Dglib=disabled",
+            "-Dgobject=disabled",
+            "-Dintrospection=disabled",
+            "-Dtests=disabled",
             "-Ddocs=disabled",
+            "-Dcairo=disabled",
+            "-Dchafa=disabled",
+            "-Dicu=disabled",
+            "-Dpng=disabled",
+            "-Dzlib=disabled",
+            "-Dgraphite2=disabled",
+            "-Dfontations=disabled",
+            "-Dharfrust=disabled",
+            "-Dwasm=disabled",
+            "-Draster=disabled",
+            "-Dvector=disabled",
+            "-Dgpu=disabled",
+            "-Dgpu_demo=disabled",
+            "-Dsubset=disabled",
+            "-Dutilities=disabled",
+            "-Dfreetype=enabled",
         ]
     }
 }
@@ -63,24 +86,22 @@ class BuildASS: BaseBuild {
         super.init(library: .libass)
     }
 
-    override func arguments(platform: PlatformType, arch: ArchType) -> [String] {
+    override func arguments(platform _: PlatformType, arch: ArchType) -> [String] {
         var result =
             [
-                "--disable-libtool-lock",
-                "--disable-fontconfig",
-                "--disable-require-system-font-provider",
-                "--disable-test",
-                "--disable-profile",
-                "--with-pic",
-                "--enable-static",
-                "--disable-shared",
-                "--disable-fast-install",
-                "--disable-dependency-tracking",
-                "--host=\(platform.host(arch: arch))",
-                "--prefix=\(thinDir(platform: platform, arch: arch).path)",
+                "-Dfontconfig=disabled",
+                "-Drequire-system-font-provider=false",
+                "-Dtest=disabled",
+                "-Dcompare=disabled",
+                "-Dprofile=disabled",
+                "-Dfuzz=disabled",
+                "-Dcheckasm=disabled",
+                "-Dlibunibreak=disabled",
             ]
         if arch == .x86_64 {
-            result.append("--enable-asm")
+            result.append("-Dasm=enabled")
+        } else {
+            result.append("-Dasm=disabled")
         }
         return result
     }

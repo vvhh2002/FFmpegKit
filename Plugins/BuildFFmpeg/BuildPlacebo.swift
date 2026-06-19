@@ -31,6 +31,21 @@ class BuildVulkan: BaseBuild {
         super.init(library: .vulkan)
     }
 
+    private var deploymentTargetEnvironment: [String: String] {
+        [
+            "IPHONEOS_DEPLOYMENT_TARGET": PlatformType.ios.minVersion,
+            "MACOSX_DEPLOYMENT_TARGET": PlatformType.macos.minVersion,
+            "TVOS_DEPLOYMENT_TARGET": PlatformType.tvos.minVersion,
+            "XROS_DEPLOYMENT_TARGET": PlatformType.xros.minVersion,
+        ]
+    }
+
+    private var deploymentTargetMakeArguments: [String] {
+        deploymentTargetEnvironment.keys.sorted().map {
+            "\($0)=\(deploymentTargetEnvironment[$0]!)"
+        }
+    }
+
     override func platforms() -> [PlatformType] {
         // Placebo编译maccatalyst的时候，vulkan会报找不到UIKit的问题，所以要先屏蔽。
         super.platforms().filter {
@@ -42,12 +57,14 @@ class BuildVulkan: BaseBuild {
         var arguments = platforms().map {
             "--\($0.name)"
         }
+        let environment = deploymentTargetEnvironment
         if !FileManager.default.fileExists(atPath: (directoryURL + "External/build/Release").path) {
-            try Utility.launch(path: (directoryURL + "fetchDependencies").path, arguments: arguments, currentDirectoryURL: directoryURL)
+            try Utility.launch(path: (directoryURL + "fetchDependencies").path, arguments: arguments, currentDirectoryURL: directoryURL, environment: environment)
         }
         arguments = platforms().map(\.name)
+        arguments.append(contentsOf: deploymentTargetMakeArguments)
         if !FileManager.default.fileExists(atPath: (directoryURL + "Package/Release/MoltenVK/static/MoltenVK.xcframework").path) || !BaseBuild.notRecompile {
-            try Utility.launch(path: "/usr/bin/make", arguments: arguments, currentDirectoryURL: directoryURL)
+            try Utility.launch(path: "/usr/bin/make", arguments: arguments, currentDirectoryURL: directoryURL, environment: environment)
         }
         try? FileManager.default.removeItem(at: URL.currentDirectory() + "../Sources/MoltenVK.xcframework")
         try? FileManager.default.copyItem(at: directoryURL + "Package/Release/MoltenVK/static/MoltenVK.xcframework", to: URL.currentDirectory() + "../Sources/MoltenVK.xcframework")
@@ -186,6 +203,17 @@ class BuildShaderc: BaseBuild {
 
     override func frameworks() throws -> [String] {
         ["libshaderc_combined"]
+    }
+
+    override func arguments(platform _: PlatformType, arch _: ArchType) -> [String] {
+        [
+            "-DSHADERC_SKIP_TESTS=ON",
+            "-DSHADERC_SKIP_EXAMPLES=ON",
+            "-DSHADERC_SKIP_EXECUTABLES=ON",
+            "-DSPIRV_SKIP_TESTS=ON",
+            "-DEFFCEE_BUILD_TESTING=OFF",
+            "-DBUILD_TESTING=OFF",
+        ]
     }
 
     override func build(platform: PlatformType, arch: ArchType, buildURL: URL) throws {

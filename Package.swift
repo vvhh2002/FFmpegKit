@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "FFmpegKit",
     defaultLocalization: "en",
-    platforms: [.macOS(.v10_15), .macCatalyst(.v14), .iOS(.v13), .tvOS(.v13),
+    platforms: [.macOS(.v13), .macCatalyst(.v16), .iOS(.v16), .tvOS(.v16),
                 .visionOS(.v1)],
     products: [
         .library(

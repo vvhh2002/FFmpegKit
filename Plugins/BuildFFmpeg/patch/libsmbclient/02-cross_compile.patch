@@ -66,17 +66,6 @@
          conf.DEFINE('_LARGE_FILES', 1)
          return True
      return False
---- a/buildtools/wafsamba/wscript
-+++ b/buildtools/wafsamba/wscript
-@@ -317,7 +317,7 @@
-     conf.CHECK_CODE('printf("hello world")',
-                     define='HAVE_SIMPLE_C_PROG',
-                     mandatory=True,
--                    execute=True,
-+                    execute=False,
-                     headers='stdio.h',
-                     msg='Checking simple C program')
- 
 --- a/lib/replace/wscript
 +++ b/lib/replace/wscript
 @@ -41,6 +41,7 @@
@@ -105,7 +94,7 @@
                      addmain=False,
                      msg="Checking for C99 vsnprintf")
  
-@@ -802,7 +803,7 @@
+@@ -802,29 +803,33 @@
                      exit(0);
                      ''',
                      define='HAVE_SECURE_MKSTEMP',
@@ -114,7 +103,11 @@
                      mandatory=True) # lets see if we get a mandatory failure for this one
  
      # look for a method of finding the list of network interfaces
-@@ -814,6 +815,7 @@
+     for method in ['HAVE_IFACE_GETIFADDRS', 'HAVE_IFACE_AIX', 'HAVE_IFACE_IFCONF', 'HAVE_IFACE_IFREQ']:
+         bsd_for_strlcpy = ''
+         if strlcpy_in_bsd:
+             bsd_for_strlcpy = ' bsd'
+         if conf.CHECK_CODE('''
                             #define %s 1
                             #define NO_CONFIG_H 1
                             #define AUTOCONF_TEST 1
@@ -122,7 +115,10 @@
                             #include "replace.c"
                             #include "inet_ntop.c"
                             #include "snprintf.c"
-@@ -824,7 +826,7 @@
+                            #include "getifaddrs.c"
+                            #define getifaddrs_test main
+                            #include "tests/getifaddrs.c"
+                            ''' % method,
                             method,
                             lib='nsl socket' + bsd_for_strlcpy,
                             addmain=False,
@@ -130,6 +126,9 @@
 +                           execute=False):
              break
  
++    if sys.platform == 'darwin' and conf.CONFIG_SET('HAVE_GETIFADDRS'):
++        conf.DEFINE('HAVE_IFACE_GETIFADDRS', 1)
++
      conf.RECURSE('system')
 --- a/lib/socket/wscript
 +++ b/lib/socket/wscript
@@ -142,7 +141,7 @@
 +            conf.DEFINE('HAVE_ETHTOOL', 1)
 --- a/source3/lib/util.c
 +++ b/source3/lib/util.c
-@@ -51,6 +51,10 @@
+@@ -48,6 +48,10 @@
  /* Max allowable allococation - 256mb - 0x10000000 */
  #define MAX_ALLOC_SIZE (1024*1024*256)
  
@@ -152,7 +151,7 @@
 +
  static enum protocol_types Protocol = PROTOCOL_COREPLUS;
  
- enum protocol_types get_Protocol(void)
+ void set_Protocol(enum protocol_types  p)
 --- a/source3/wscript
 +++ b/source3/wscript
 @@ -156,7 +156,7 @@
@@ -257,16 +256,18 @@
  	/*@*/;
 --- a/wscript
 +++ b/wscript
-@@ -175,7 +175,7 @@
+@@ -216,17 +216,17 @@
      conf.SAMBA_CHECK_PYTHON()
      conf.SAMBA_CHECK_PYTHON_HEADERS()
+ 
+     conf.SAMBA_CHECK_RUST()
  
 -    if sys.platform == 'darwin' and not conf.env['HAVE_ENVIRON_DECL']:
 +    if os.getenv('HOST', sys.platform).find('darwin') > -1 and not conf.env['HAVE_ENVIRON_DECL']:
          # Mac OSX needs to have this and it's also needed that the python is compiled with this
          # otherwise you face errors about common symbols
          if not conf.CHECK_SHLIB_W_PYTHON("Checking if -fno-common is needed"):
-@@ -183,7 +183,7 @@
+             conf.ADD_CFLAGS('-fno-common')
          if not conf.CHECK_SHLIB_W_PYTHON("Checking if -undefined dynamic_lookup is not need"):
              conf.env.append_value('cshlib_LINKFLAGS', ['-undefined', 'dynamic_lookup'])
  
@@ -277,8 +278,9 @@
      conf.RECURSE('dynconfig')
 --- a/wscript_configure_embedded_heimdal
 +++ b/wscript_configure_embedded_heimdal
-@@ -8 +8,10 @@
- conf.RECURSE('source4/heimdal_build')
+@@ -7,6 +7,15 @@
+ conf.define('USING_EMBEDDED_HEIMDAL', 1)
+ conf.RECURSE('third_party/heimdal_build')
 +
 +def check_system_heimdal_binary(name):
 +    if not conf.find_program(name, var=name.upper()):
@@ -288,3 +290,7 @@
 +
 +check_system_heimdal_binary("compile_et")
 +check_system_heimdal_binary("asn1_compile")
+ 
+ #
+ # See https://github.com/heimdal/heimdal/pull/1234
+ # and https://github.com/krb5/krb5/pull/1329

@@ -27,6 +27,45 @@
      if pyext:
          features += ' pyext'
      if pyembed:
+@@ -817,9 +817,11 @@
+             SET_TARGET_TYPE(bld, modname, 'EMPTY')
+             return
+         empty_c = modname + '.empty.c'
+-        bld.SAMBA_GENERATOR('%s_empty_c' % modname,
+-                            rule=generate_empty_file,
+-                            target=empty_c)
++        empty_c_target = '%s_empty_c' % modname
++        if GET_TARGET_TYPE(bld, empty_c_target) is None:
++            bld.SAMBA_GENERATOR(empty_c_target,
++                                rule=generate_empty_file,
++                                target=empty_c)
+         source=empty_c
+ 
+     if not SET_TARGET_TYPE(bld, modname, target_type):
+--- a/dynconfig/wscript
++++ b/dynconfig/wscript
+@@ -443,7 +443,8 @@
+                         deps='replace',
+                         public_headers=os.path.relpath(os.path.join(Context.launch_dir, version_header), bld.path.abspath()),
+                         header_path='samba',
+-                        cflags=cflags)
++                        cflags=cflags,
++                        provide_builtin_linking=True)
+ 
+     # install some extra empty directories
+     bld.INSTALL_DIR("${CONFIGDIR}")
+--- a/lib/crypto/wscript
++++ b/lib/crypto/wscript
+@@ -14,7 +14,8 @@
+                         gnutls_weak_crypto.c
+                         gnutls_sp800_108.c
+                         ''' + legacy_gnutls_helpers,
+-                        deps="gnutls samba-errors")
++                        deps="gnutls samba-errors",
++                        provide_builtin_linking=True)
+ 
+     bld.SAMBA_SUBSYSTEM('LIBCRYPTO',
+                         source='''
 --- a/source3/libsmb/smbclient.pc.in
 +++ b/source3/libsmb/smbclient.pc.in
 @@ -7,5 +7,7 @@
@@ -37,8 +76,20 @@
 +Requires.private: @REQUIRES_PRIVATE@
  Cflags: -I${includedir}
  URL: http://www.samba.org/
---- a/source4/heimdal/lib/hcrypto/camellia-ntt.h
-+++ b/source4/heimdal/lib/hcrypto/camellia-ntt.h
+--- a/libcli/dns/wscript_build
++++ b/libcli/dns/wscript_build
+@@ -13,7 +13,8 @@
+ 
+ bld.SAMBA_SUBSYSTEM('dns_lookup',
+                     source='dns_lookup.c',
+-                    public_deps='clidns')
++                    public_deps='clidns',
++                    provide_builtin_linking=True)
+ 
+ bld.SAMBA_BINARY('dns_lookuptest',
+                   source='dns_lookuptest.c',
+--- a/third_party/heimdal/lib/hcrypto/camellia-ntt.h
++++ b/third_party/heimdal/lib/hcrypto/camellia-ntt.h
 @@ -35,6 +35,10 @@
  
  typedef u32 KEY_TABLE_TYPE[CAMELLIA_TABLE_WORD_LEN];

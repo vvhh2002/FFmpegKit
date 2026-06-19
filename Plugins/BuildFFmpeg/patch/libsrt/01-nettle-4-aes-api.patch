@@ -1,0 +1,196 @@
+diff --git a/haicrypt/cryspr-gnutls.c b/haicrypt/cryspr-gnutls.c
+index 7fbce4e..598b2e7 100644
+--- a/haicrypt/cryspr-gnutls.c
++++ b/haicrypt/cryspr-gnutls.c
+@@ -38,6 +38,48 @@ int crysprGnuTLS_Prng(unsigned char *rn, int len)
+     return(gnutls_rnd(GNUTLS_RND_KEY,(rn),(len)) < 0 ? -1 : 0);
+ }
+ 
++static int crysprGnuTLS_AES_Encrypt(
++    CRYSPR_AESCTX *aes_key,
++    size_t len,
++    unsigned char *out_txt,
++    const unsigned char *indata)
++{
++    switch (aes_key->key_len) {
++    case AES128_KEY_SIZE:
++        aes128_encrypt(&aes_key->ctx.aes128, len, out_txt, indata);
++        return 0;
++    case AES192_KEY_SIZE:
++        aes192_encrypt(&aes_key->ctx.aes192, len, out_txt, indata);
++        return 0;
++    case AES256_KEY_SIZE:
++        aes256_encrypt(&aes_key->ctx.aes256, len, out_txt, indata);
++        return 0;
++    default:
++        return -1;
++    }
++}
++
++static int crysprGnuTLS_AES_Decrypt(
++    CRYSPR_AESCTX *aes_key,
++    size_t len,
++    unsigned char *out_txt,
++    const unsigned char *indata)
++{
++    switch (aes_key->key_len) {
++    case AES128_KEY_SIZE:
++        aes128_decrypt(&aes_key->ctx.aes128, len, out_txt, indata);
++        return 0;
++    case AES192_KEY_SIZE:
++        aes192_decrypt(&aes_key->ctx.aes192, len, out_txt, indata);
++        return 0;
++    case AES256_KEY_SIZE:
++        aes256_decrypt(&aes_key->ctx.aes256, len, out_txt, indata);
++        return 0;
++    default:
++        return -1;
++    }
++}
++
+ int crysprGnuTLS_AES_SetKey(
+     int cipher_type,            /* One of HCRYPT_CTX_MODE_[CLRTXT|AESECB|AESCTR] */
+     bool bEncrypt,              /* true:encrypt key, false:decrypt key*/
+@@ -47,18 +89,41 @@ int crysprGnuTLS_AES_SetKey(
+ {
+     (void)cipher_type;
+ 
++    if (!(kstr_len == AES128_KEY_SIZE || kstr_len == AES192_KEY_SIZE || kstr_len == AES256_KEY_SIZE)) {
++        HCRYPT_LOG(LOG_ERR, "%s", "AES_set_key bad length\n");
++        return -1;
++    }
++
++    aes_key->key_len = kstr_len;
++
+     if (bEncrypt) {        /* Encrypt key */
+-        if (!(kstr_len == 16 || kstr_len == 24 || kstr_len == 32)) {
+-            HCRYPT_LOG(LOG_ERR, "%s", "AES_set_encrypt_key(kek) bad length\n");
+-          return -1;
++        switch (kstr_len) {
++        case AES128_KEY_SIZE:
++            aes128_set_encrypt_key(&aes_key->ctx.aes128, kstr);
++            break;
++        case AES192_KEY_SIZE:
++            aes192_set_encrypt_key(&aes_key->ctx.aes192, kstr);
++            break;
++        case AES256_KEY_SIZE:
++            aes256_set_encrypt_key(&aes_key->ctx.aes256, kstr);
++            break;
++        default:
++            return -1;
+         }
+-        aes_set_encrypt_key (aes_key, kstr_len, kstr);
+     } else {               /* Decrypt key */
+-        if (!(kstr_len == 16 || kstr_len == 24 || kstr_len == 32)) {
+-            HCRYPT_LOG(LOG_ERR, "%s", "AES_set_decrypt_key(kek) bad length\n");
+-          return -1;
++        switch (kstr_len) {
++        case AES128_KEY_SIZE:
++            aes128_set_decrypt_key(&aes_key->ctx.aes128, kstr);
++            break;
++        case AES192_KEY_SIZE:
++            aes192_set_decrypt_key(&aes_key->ctx.aes192, kstr);
++            break;
++        case AES256_KEY_SIZE:
++            aes256_set_decrypt_key(&aes_key->ctx.aes256, kstr);
++            break;
++        default:
++            return -1;
+         }
+-        aes_set_decrypt_key (aes_key, kstr_len, kstr);
+     }
+     return(0);
+ }
+@@ -78,7 +143,9 @@ int crysprGnuTLS_AES_EcbCipher( /* AES Electronic Codebook cipher*/
+     if (bEncrypt) {
+         /* Encrypt packet payload, block by block, in output buffer */
+         for (i=0; i<nblk; i++){
+-            aes_encrypt(aes_key, CRYSPR_AESBLKSZ, &out_txt[(i*CRYSPR_AESBLKSZ)], &indata[(i*CRYSPR_AESBLKSZ)]);
++            if (crysprGnuTLS_AES_Encrypt(aes_key, CRYSPR_AESBLKSZ, &out_txt[(i*CRYSPR_AESBLKSZ)], &indata[(i*CRYSPR_AESBLKSZ)]) != 0) {
++                return -1;
++            }
+         }
+         /* Encrypt last incomplete block */
+         if (0 < nmore) {
+@@ -86,13 +153,17 @@ int crysprGnuTLS_AES_EcbCipher( /* AES Electronic Codebook cipher*/
+ 
+             memcpy(intxt, &indata[(nblk*CRYSPR_AESBLKSZ)], nmore);
+             memset(intxt+nmore, 0, CRYSPR_AESBLKSZ-nmore);
+-            aes_encrypt(aes_key, CRYSPR_AESBLKSZ, &out_txt[(nblk*CRYSPR_AESBLKSZ)], intxt);
++            if (crysprGnuTLS_AES_Encrypt(aes_key, CRYSPR_AESBLKSZ, &out_txt[(nblk*CRYSPR_AESBLKSZ)], intxt) != 0) {
++                return -1;
++            }
+             nblk++;
+         }
+         if (outlen != NULL) *outlen = nblk*CRYSPR_AESBLKSZ;
+     } else { /* Decrypt */
+         for (i=0; i<nblk; i++){
+-            aes_decrypt(aes_key, CRYSPR_AESBLKSZ, &out_txt[(i*CRYSPR_AESBLKSZ)], &indata[(i*CRYSPR_AESBLKSZ)]);
++            if (crysprGnuTLS_AES_Decrypt(aes_key, CRYSPR_AESBLKSZ, &out_txt[(i*CRYSPR_AESBLKSZ)], &indata[(i*CRYSPR_AESBLKSZ)]) != 0) {
++                return -1;
++            }
+         }
+         /* Encrypt last incomplete block */
+         if (0 < nmore) {
+@@ -113,13 +184,25 @@ int crysprGnuTLS_AES_CtrCipher( /* AES-CTR128 Encryption */
+ {
+     (void)bEncrypt;             /* CTR mode encrypt for both encryption and decryption */
+ 
+-    ctr_crypt (aes_key,         /* ctx */
+-               (nettle_cipher_func*)aes_encrypt, /* nettle_cipher_func */
+-               CRYSPR_AESBLKSZ,  /* cipher blocksize */
+-               iv,              /* iv */
+-               inlen,           /* length */
+-               out_txt,         /* dest */
+-               indata);         /* src */
++    switch (aes_key->key_len) {
++    case AES128_KEY_SIZE:
++        ctr_crypt (&aes_key->ctx.aes128, /* ctx */
++                   (nettle_cipher_func*)aes128_encrypt, /* nettle_cipher_func */
++                   CRYSPR_AESBLKSZ, iv, inlen, out_txt, indata);
++        break;
++    case AES192_KEY_SIZE:
++        ctr_crypt (&aes_key->ctx.aes192, /* ctx */
++                   (nettle_cipher_func*)aes192_encrypt, /* nettle_cipher_func */
++                   CRYSPR_AESBLKSZ, iv, inlen, out_txt, indata);
++        break;
++    case AES256_KEY_SIZE:
++        ctr_crypt (&aes_key->ctx.aes256, /* ctx */
++                   (nettle_cipher_func*)aes256_encrypt, /* nettle_cipher_func */
++                   CRYSPR_AESBLKSZ, iv, inlen, out_txt, indata);
++        break;
++    default:
++        return -1;
++    }
+     return 0;
+ }
+ 
+diff --git a/haicrypt/cryspr-gnutls.h b/haicrypt/cryspr-gnutls.h
+index 27c9c17..ef8d3fa 100644
+--- a/haicrypt/cryspr-gnutls.h
++++ b/haicrypt/cryspr-gnutls.h
+@@ -20,6 +20,8 @@ written by
+ #ifndef CRYSPR_GNUTLS_H
+ #define CRYSPR_GNUTLS_H
+ 
++#include <stddef.h>
++
+ #include <gnutls/gnutls.h>
+ #include <gnutls/crypto.h>  //gnutls_rnd()
+ 
+@@ -53,7 +55,14 @@ This type reserves room in the CRYPSPR control block for Haicrypt KEK and SEK
+ It is set from the keystring through CRYSPR_methods.aes_set_key and passed
+ to CRYSPR_methods.aes_XXX.
+ */
+-typedef struct aes_ctx CRYSPR_AESCTX;   /* CRYpto Service PRovider AES key context */
++typedef struct tag_CRYSPR_AESCTX {
++    size_t key_len;
++    union {
++        struct aes128_ctx aes128;
++        struct aes192_ctx aes192;
++        struct aes256_ctx aes256;
++    } ctx;
++} CRYSPR_AESCTX;   /* CRYpto Service PRovider AES key context */
+ 
+ struct tag_CRYSPR_methods *crysprGnuTLS(void);
+ 

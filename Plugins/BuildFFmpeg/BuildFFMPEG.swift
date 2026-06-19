@@ -100,8 +100,8 @@ class BuildFFMPEG: BaseBuild {
             "libavcodec/d3d11va.h", "libavcodec/dxva2.h", "libavcodec/vdpau.h", "libavcodec/qsv.h",
             "libavutil/hwcontext_d3d11va.h", "libavutil/hwcontext_d3d12va.h", "libavutil/hwcontext_dxva2.h",
             "libavutil/hwcontext_vdpau.h", "libavutil/hwcontext_amf.h", "libavutil/hwcontext_qsv.h",
-            "libavutil/hwcontext_cuda.h", "libavutil/hwcontext_drm.h", "libavutil/hwcontext_mediacodec.h", "libavutil/hwcontext_oh.h",
-            "libavutil/hwcontext_vaapi.h", "libavutil/hwcontext_opencl.h", "libavutil/hwcontext_vulkan.h",
+            "libavutil/hwcontext_cuda.h", "libavutil/hwcontext_mediacodec.h", "libavutil/hwcontext_oh.h",
+            "libavutil/hwcontext_vaapi.h", "libavutil/hwcontext_opencl.h",
         ]
         for header in headersToRemove {
             let headerPath = prefix + "include" + header
@@ -349,6 +349,10 @@ class BuildFFMPEG: BaseBuild {
         for library in Library.allCases {
             let path = URL.currentDirectory + [library.rawValue, platform.rawValue, "thin", arch.rawValue]
             if FileManager.default.fileExists(atPath: path.path), library.isFFmpegDependentLibrary {
+                if library == .libplacebo, platform == .maccatalyst {
+                    // Catalyst libplacebo is built without Vulkan, while FFmpeg checks pl_vulkan_create.
+                    continue
+                }
                 arguments.append("--enable-\(library.rawValue)")
                 if library == .libsrt || library == .libsmbclient {
                     arguments.append("--enable-protocol=\(library.rawValue)")
@@ -396,7 +400,7 @@ class BuildFFMPEG: BaseBuild {
         // ,"--disable-rdft"
         // ,"--disable-fft"
         // Hardware accelerators:
-        "--disable-d3d11va", "--disable-d3d12va", "--disable-dxva2", "--disable-vaapi", "--disable-vdpau", "--disable-drm", "--disable-mediacodec", "--disable-oh",
+        "--disable-d3d11va", "--disable-d3d12va", "--disable-dxva2", "--disable-vaapi", "--disable-vdpau", "--disable-libdrm", "--disable-mediacodec",
         // todo ffmpeg的编译脚本有问题，没有加入libavcodec/vulkan_video_codec_av1std.h
         "--disable-hwaccel=av1_vulkan,hevc_vulkan,h264_vulkan",
         // Individual component options:

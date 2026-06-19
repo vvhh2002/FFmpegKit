@@ -147,37 +147,37 @@ enum Library: String, CaseIterable {
     var version: String {
         switch self {
         case .FFmpeg:
-            return "n8.1"
+            return "release/8.1"
         case .libfreetype:
-            return "VER-2-13-2"
+            return "VER-2-14-3"
         case .libfribidi:
-            return "v1.0.12"
+            return "v1.0.16"
         case .libharfbuzz:
-            return "5.3.1"
+            return "14.2.1"
         case .libass:
-            return "0.17.1-branch"
+            return "0.17.4"
         case .libpng:
             return "v1.6.43"
         case .libmpv:
-            return "v0.37.0"
+            return "v0.41.0"
         case .openssl:
             return "openssl-3.2.1"
         case .libsrt:
-            return "v1.5.3"
+            return "v1.5.5"
         case .libsmbclient:
-            return "samba-4.15.13"
+            return "samba-4.24.3"
         case .gnutls:
-            return "3.8.3"
+            return "3.8.13"
         case .nettle:
-            return "nettle_3.10_release_20240616"
+            return "nettle_4.0_release_20260205"
         case .libdav1d:
-            return "1.1.0"
+            return "1.5.3"
         case .gmp:
-            return "v6.2.1"
+            return "6.3.0"
         case .libtls:
             return "OPENBSD_7_3"
         case .libzvbi:
-            return "v0.2.42"
+            return "v0.2.44"
         case .boringssl:
             return "master"
         case .libplacebo:
@@ -185,15 +185,15 @@ enum Library: String, CaseIterable {
         case .vulkan:
             return "v1.2.8"
         case .libshaderc:
-            return "v2024.0"
+            return "v2026.2"
         case .readline:
-            return "readline-8.2"
+            return "readline-8.3"
         case .libglslang:
             return "13.1.1"
         case .libdovi:
             return "2.1.0"
         case .lcms2:
-            return "lcms2.16"
+            return "lcms2.19.1"
         case .libupnp:
             return "release-1.14.18"
         case .libnfs:
@@ -201,10 +201,14 @@ enum Library: String, CaseIterable {
         case .libbluray:
             return "1.3.4"
         case .libfontconfig:
-            return "2.14.2"
+            return "2.18.1"
         case .libsmb2:
             return "master"
         }
+    }
+
+    var sourceDirectoryName: String {
+        "\(rawValue)-\(version.replacingOccurrences(of: "/", with: "-"))"
     }
 
     var url: String {
@@ -220,7 +224,7 @@ enum Library: String, CaseIterable {
         case .nettle:
             return "https://git.lysator.liu.se/nettle/nettle"
         case .gmp:
-            return "https://github.com/alisw/GMP"
+            return "https://gmplib.org/download/gmp/gmp-\(version).tar.xz"
         case .libdav1d:
             return "https://github.com/videolan/dav1d"
         case .libtls:
@@ -350,14 +354,9 @@ class BaseBuild {
     let directoryURL: URL
     init(library: Library) {
         self.library = library
-        directoryURL = URL.currentDirectory + "\(library.rawValue)-\(library.version)"
+        directoryURL = URL.currentDirectory + library.sourceDirectoryName
         if !FileManager.default.fileExists(atPath: directoryURL.path) {
-            var arguments = ["clone", "--recurse-submodules"]
-            if !BaseBuild.gitCloneAll {
-                arguments.append(contentsOf: ["--depth", "1"])
-            }
-            arguments.append(contentsOf: ["--branch", library.version, library.url, directoryURL.path])
-            try! Utility.launch(path: "/usr/bin/git", arguments: arguments)
+            try! prepareSource()
         }
         let patch = URL.currentDirectory + "../Plugins/BuildFFmpeg/patch/\(library.rawValue)"
         if FileManager.default.fileExists(atPath: patch.path) {
@@ -367,6 +366,41 @@ class BaseBuild {
                 _ = try? Utility.launch(path: "/usr/bin/git", arguments: ["apply", "\((patch + fileName).path)"], currentDirectoryURL: directoryURL)
             }
         }
+    }
+
+    func prepareSource() throws {
+        if library.url.hasSuffix(".tar.xz") || library.url.hasSuffix(".tar.gz") || library.url.hasSuffix(".tgz") {
+            try downloadAndExtractSourceArchive()
+        } else {
+            var arguments = ["clone", "--recurse-submodules"]
+            if !BaseBuild.gitCloneAll {
+                arguments.append(contentsOf: ["--depth", "1"])
+            }
+            arguments.append(contentsOf: ["--branch", library.version, library.url, directoryURL.path])
+            try Utility.launch(path: "/usr/bin/git", arguments: arguments)
+        }
+    }
+
+    func downloadAndExtractSourceArchive() throws {
+        let archiveName = URL(string: library.url)?.lastPathComponent ?? "\(library.sourceDirectoryName).tar.xz"
+        let archiveURL = URL.currentDirectory + archiveName
+        if !FileManager.default.fileExists(atPath: archiveURL.path) {
+            try Utility.launch(path: "/usr/bin/curl", arguments: ["-fL", "-o", archiveURL.path, library.url])
+        }
+
+        let extractURL = URL.currentDirectory + ".\(library.sourceDirectoryName).extract"
+        try? FileManager.default.removeItem(at: extractURL)
+        try FileManager.default.createDirectory(at: extractURL, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: extractURL)
+        }
+
+        try Utility.launch(path: "/usr/bin/tar", arguments: ["-xf", archiveURL.path, "-C", extractURL.path])
+        let entries = try FileManager.default.contentsOfDirectory(at: extractURL, includingPropertiesForKeys: [.isDirectoryKey])
+        guard let extractedURL = entries.first(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }) else {
+            throw NSError(domain: "BuildFFmpeg", code: 1, userInfo: [NSLocalizedDescriptionKey: "Archive \(archiveName) did not contain a source directory"])
+        }
+        try FileManager.default.moveItem(at: extractedURL, to: directoryURL)
     }
 
     func platforms() -> [PlatformType] {
@@ -391,8 +425,10 @@ class BaseBuild {
     }
 
     func build(platform: PlatformType, arch: ArchType, buildURL: URL) throws {
-        try? _ = Utility.launch(path: "/usr/bin/make", arguments: ["clean"], currentDirectoryURL: buildURL)
-        try? _ = Utility.launch(path: "/usr/bin/make", arguments: ["distclean"], currentDirectoryURL: buildURL)
+        if FileManager.default.fileExists(atPath: (buildURL + "Makefile").path) {
+            try? _ = Utility.launch(path: "/usr/bin/make", arguments: ["clean"], currentDirectoryURL: buildURL)
+            try? _ = Utility.launch(path: "/usr/bin/make", arguments: ["distclean"], currentDirectoryURL: buildURL)
+        }
         let environ = environment(platform: platform, arch: arch)
         if FileManager.default.fileExists(atPath: (directoryURL + "meson.build").path) {
             if Utility.shell("which meson") == nil {
@@ -449,6 +485,9 @@ class BaseBuild {
                 "-DCMAKE_INSTALL_PREFIX=\(thinDirPath)",
                 "-DBUILD_SHARED_LIBS=0",
             ]
+            if platform != .android {
+                arguments.append("-DCMAKE_OSX_DEPLOYMENT_TARGET=\(platform.minVersion)")
+            }
             arguments.append(contentsOf: self.arguments(platform: platform, arch: arch))
             try Utility.launch(path: cmake, arguments: arguments, currentDirectoryURL: buildURL, environment: environ)
         } else {
@@ -729,7 +768,7 @@ class BaseBuild {
         objcpp = '/usr/bin/clang++'
         ar = '\(platform.xcrunFind(tool: "ar"))'
         strip = '\(platform.xcrunFind(tool: "strip"))'
-        pkgconfig = 'pkg-config'
+        pkg-config = 'pkg-config'
 
         [properties]
         has_function_printf = true
@@ -766,13 +805,13 @@ enum PlatformType: String, CaseIterable {
     var minVersion: String {
         switch self {
         case .ios, .isimulator:
-            return "13.0"
+            return "16.0"
         case .tvos, .tvsimulator:
-            return "13.0"
+            return "16.0"
         case .macos:
-            return "10.15"
+            return "13.0"
         case .maccatalyst:
-            return "14.0"
+            return "16.0"
         case .watchos, .watchsimulator:
             return "6.0"
         case .xros, .xrsimulator:
@@ -1055,6 +1094,10 @@ enum ArchType: String, CaseIterable {
 }
 
 enum Utility {
+    private static let defaultPath = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    private static let buildProxyKeys = ["BUILD_FFMPEG_PROXY", "BUILDFMPEG_PROXY"]
+    private static let proxyKeys = ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"]
+
     @discardableResult
     static func shell(_ command: String, isOutput: Bool = false, currentDirectoryURL: URL? = nil, environment: [String: String] = [:]) -> String? {
         do {
@@ -1074,13 +1117,10 @@ enum Utility {
     static func launch(executableURL: URL, arguments: [String], isOutput: Bool = false, currentDirectoryURL: URL? = nil, environment: [String: String] = [:]) throws -> String {
         #if os(macOS)
         let task = Process()
-        var environment = environment
-        if environment["PATH"] == nil {
-            environment["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        }
-        task.environment = environment
+        let resolvedEnvironment = resolvedEnvironment(overrides: environment)
+        task.environment = resolvedEnvironment
         var standardOutput: FileHandle?
-        var log = executableURL.path + " " + arguments.joined(separator: " ") + "\n environment: " + environment.description
+        var log = executableURL.path + " " + arguments.joined(separator: " ") + "\n environment: " + logEnvironment(resolvedEnvironment, explicitKeys: Set(environment.keys))
         if isOutput {
             let pipe = Pipe()
             task.standardOutput = pipe
@@ -1118,6 +1158,63 @@ enum Utility {
         #else
         return ""
         #endif
+    }
+
+    private static func resolvedEnvironment(overrides: [String: String]) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        overrides.forEach { key, value in
+            environment[key] = value
+        }
+
+        if environment["HOME"]?.isEmpty ?? true {
+            environment["HOME"] = NSHomeDirectory()
+        }
+        if environment["PATH"]?.isEmpty ?? true {
+            environment["PATH"] = defaultPath
+        }
+
+        applyProxyDefaults(to: &environment)
+        return environment
+    }
+
+    private static func applyProxyDefaults(to environment: inout [String: String]) {
+        if let configuredProxy = firstNonEmpty(buildProxyKeys.map({ environment[$0] })) {
+            for key in proxyKeys where !key.lowercased().contains("no_proxy") {
+                environment[key] = configuredProxy
+            }
+            return
+        }
+
+        guard let proxy = firstNonEmpty(["http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"].map({ environment[$0] })) else {
+            return
+        }
+        for key in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"] where environment[key]?.isEmpty ?? true {
+            environment[key] = proxy
+        }
+    }
+
+    private static func firstNonEmpty(_ values: [String?]) -> String? {
+        values.compactMap { $0 }.first { !$0.isEmpty }
+    }
+
+    private static func logEnvironment(_ environment: [String: String], explicitKeys: Set<String>) -> String {
+        let keys = explicitKeys.union(Set(["HOME", "PATH"] + buildProxyKeys + proxyKeys)).sorted()
+        var logged = [String: String]()
+        for key in keys {
+            guard let value = environment[key], !value.isEmpty else {
+                continue
+            }
+            logged[key] = redactedEnvironmentValue(key: key, value: value)
+        }
+        return logged.description
+    }
+
+    private static func redactedEnvironmentValue(key: String, value: String) -> String {
+        let lowercasedKey = key.lowercased()
+        if ["password", "passwd", "token", "secret", "credential"].contains(where: lowercasedKey.contains) {
+            return "<redacted>"
+        }
+        return value
     }
 }
 

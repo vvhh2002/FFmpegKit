@@ -1,0 +1,399 @@
+diff --git a/buildtools/wafsamba/samba_deps.py b/buildtools/wafsamba/samba_deps.py
+index 6db44cc..56d1e4e 100644
+--- a/buildtools/wafsamba/samba_deps.py
++++ b/buildtools/wafsamba/samba_deps.py
+@@ -203,7 +203,9 @@ def add_init_functions(self):
+ 
+     # cope with the separated object lists from BINARY and LIBRARY targets
+     sname = self.sname
+-    if sname.endswith('.objlist'):
++    if sname.endswith('.builtin.objlist'):
++        sname = sname[0:-16]
++    elif sname.endswith('.objlist'):
+         sname = sname[0:-8]
+ 
+     modules = []
+@@ -412,7 +414,9 @@ def replace_builtin_subsystem_deps(bld, tgt_list):
+                     debug("deps: target %s: dependency %s requires builtin deps only" % (t.sname, dep))
+                     continue
+                 debug("deps: target %s: dependency %s requires builtin linking" % (t.sname, dep))
+-            bld.ASSERT(sdt is not None, "target %s: dependency target %s is missing samba_builtin_subsystem" % (t.sname, dep))
++            if sdt is None:
++                debug("deps: target %s: dependency %s has no builtin subsystem, keeping normal dependency" % (t.sname, dep))
++                continue
+             sdep = sdt.sname
+             bld.ASSERT(sdep in targets, "target %s: builtin dependency target %s (from %s) not declared" % (t.sname, sdep, dep))
+             sdt = targets[sdep]
+@@ -1309,5 +1313,3 @@ def CHECK_PROJECT_RULES(bld):
+     bld.env.added_project_rules = True
+     bld.add_pre_fun(check_project_rules)
+ Build.BuildContext.CHECK_PROJECT_RULES = CHECK_PROJECT_RULES
+-
+-
+diff --git a/buildtools/wafsamba/wafsamba.py b/buildtools/wafsamba/wafsamba.py
+index 4a9ecf1..64a25b7 100644
+--- a/buildtools/wafsamba/wafsamba.py
++++ b/buildtools/wafsamba/wafsamba.py
+@@ -84,6 +84,23 @@ def ADD_INIT_FUNCTION(bld, subsystem, target, init_function):
+     if subsystem not in cache:
+         cache[subsystem] = []
+     cache[subsystem].append( { 'TARGET':target, 'INIT_FUNCTION':init_function } )
++
++    def add_module_dependency(tgen, dep):
++        if tgen is None:
++            return
++        deps = TO_LIST(getattr(tgen, 'samba_deps', []))
++        if dep not in deps:
++            deps.append(dep)
++            tgen.samba_deps = deps
++
++    try:
++        subsystem_tgen = bld.get_tgen_by_name(subsystem)
++    except Errors.WafError:
++        subsystem_tgen = None
++
++    add_module_dependency(subsystem_tgen, target)
++    builtin_tgen = getattr(subsystem_tgen, 'samba_builtin_subsystem', None)
++    add_module_dependency(builtin_tgen, target)
+ Build.BuildContext.ADD_INIT_FUNCTION = ADD_INIT_FUNCTION
+ 
+ 
+@@ -213,13 +213,13 @@ def SAMBA_LIBRARY(bld, libname, source,
+ 
+     if BUILTIN_LIBRARY(bld, libname):
+         builtin_target = libname + '.builtin.objlist'
+-        builtin_cflags_end = '-D_PUBLIC_=_PRIVATE_'
++        builtin_cflags_end = '-D_PUBLIC_='
+         empty_target = libname
+         obj_target = None
+     else:
+         if provide_builtin_linking:
+             builtin_target = libname + '.builtin.objlist'
+-            builtin_cflags_end = '-D_PUBLIC_=_PRIVATE_'
++            builtin_cflags_end = '-D_PUBLIC_='
+         else:
+             builtin_target = None
+         empty_target = None
+@@ -238,6 +238,8 @@ def SAMBA_LIBRARY(bld, libname, source,
+     # by separating in this way, we avoid recompiling the C files
+     # separately for the install library and the build library
+     if builtin_target:
++        builtin_cflags = TO_LIST(cflags) + TO_LIST(builtin_cflags)
++        builtin_cflags_end = TO_LIST(cflags_end) + TO_LIST(builtin_cflags_end)
+         __t = __SAMBA_SUBSYSTEM_BUILTIN(bld, builtin_target, source,
+                                         deps=deps,
+                                         public_deps=public_deps,
+@@ -246,6 +248,8 @@ def SAMBA_LIBRARY(bld, libname, source,
+                                         builtin_cflags=builtin_cflags,
+                                         builtin_cflags_end=builtin_cflags_end,
+                                         group=group,
++                                        autoproto=autoproto,
++                                        autoproto_extra_source=autoproto_extra_source,
+                                         depends_on=depends_on,
+                                         local_include=local_include,
+                                         global_include=global_include,
+@@ -895,8 +899,8 @@ def SAMBA_SUBSYSTEM(bld, modname, source,
+                                              public_deps=public_deps,
+                                              includes=includes,
+                                              header_path=header_path,
+-                                             builtin_cflags=builtin_cflags,
+-                                             builtin_cflags_end='-D_PUBLIC_=_PRIVATE_',
++                                             builtin_cflags=TO_LIST(cflags) + TO_LIST(builtin_cflags),
++                                             builtin_cflags_end=TO_LIST(cflags_end) + TO_LIST('-D_PUBLIC_='),
+                                              group=group,
+                                              depends_on=depends_on,
+                                              local_include=local_include,
+diff --git a/dynconfig/wscript b/dynconfig/wscript
+index 983fec2..f016533 100644
+--- a/dynconfig/wscript
++++ b/dynconfig/wscript
+@@ -446,6 +446,7 @@ def build(bld):
+                         public_headers=os.path.relpath(os.path.join(Context.launch_dir, version_header), bld.path.abspath()),
+                         header_path='samba',
+                         cflags=cflags,
++                        builtin_cflags=cflags,
+                         provide_builtin_linking=True)
+ 
+     # install some extra empty directories
+diff --git a/lib/ldb/wscript b/lib/ldb/wscript
+index be82bdb..435e7b4 100644
+--- a/lib/ldb/wscript
++++ b/lib/ldb/wscript
+@@ -285,6 +285,7 @@ def build(bld):
+                         deps='tevent tdb',
+                         includes='include',
+                         cflags=['-DLDB_MODULESDIR=\"%s\"' % modules_dir],
++                        builtin_cflags=['-DLDB_MODULESDIR=\"%s\"' % modules_dir],
+                         provide_builtin_linking=True)
+ 
+     LDB_TOOLS='ldbadd ldbsearch ldbdel ldbmodify ldbedit ldbrename'
+@@ -445,4 +446,3 @@ def build(bld):
+                          source='tests/ldb_no_lmdb_test.c',
+                          deps='cmocka ldb',
+                          install=False)
+-
+diff --git a/lib/pthreadpool/wscript_build b/lib/pthreadpool/wscript_build
+index 2645847..c863518 100644
+--- a/lib/pthreadpool/wscript_build
++++ b/lib/pthreadpool/wscript_build
+@@ -11,14 +11,16 @@ if bld.env.WITH_PTHREADPOOL:
+                                    pthreadpool_pipe.c
+                                    pthreadpool_tevent.c
+                                 ''',
+-                         deps='pthread replace tevent-util' + extra_libs)
++                         deps='pthread replace tevent-util' + extra_libs,
++                         provide_builtin_linking=True)
+ else:
+     bld.SAMBA_SUBSYSTEM('PTHREADPOOL',
+                          source='''pthreadpool_sync.c
+                                    pthreadpool_pipe.c
+                                    pthreadpool_tevent.c
+                                 ''',
+-                         deps='replace tevent-util')
++                         deps='replace tevent-util',
++                         provide_builtin_linking=True)
+ 
+ 
+ bld.SAMBA_BINARY('pthreadpooltest',
+diff --git a/libcli/wsp/wscript_build b/libcli/wsp/wscript_build
+index d19f824..b49e228 100644
+--- a/libcli/wsp/wscript_build
++++ b/libcli/wsp/wscript_build
+@@ -40,7 +40,6 @@ bld.SAMBA_SUBSYSTEM('LIBSAMBA_WSP',
+ bld.SAMBA_BINARY('test_wsp_parser',
+     source='test_wsp_parser.c',
+     deps= 'dcerpc CMDLINE_S3 LIBSAMBA_WSP NDR_WSP NDR_WSP_DATA WSP_UTIL cmocka',
+-    enabled=bld.env.with_wsp,
++    enabled=False,
+     install=False
+     )
+-
+diff --git a/librpc/wscript_build b/librpc/wscript_build
+index 98f2777..6320bd0 100644
+--- a/librpc/wscript_build
++++ b/librpc/wscript_build
+@@ -219,7 +219,8 @@ bld.SAMBA_SUBSYSTEM('NDR_DNSP',
+ 
+ bld.SAMBA_SUBSYSTEM('NDR_NFS4ACL',
+     source='gen_ndr/ndr_nfs4acl.c',
+-    public_deps='ndr NDR_SECURITY'
++    public_deps='ndr NDR_SECURITY',
++    provide_builtin_linking=True
+     )
+ 
+ bld.SAMBA_SUBSYSTEM('NDR_NTPRINTING',
+@@ -744,7 +745,8 @@ bld.SAMBA_SUBSYSTEM('DCERPC_HELPER',
+ 
+ bld.SAMBA_SUBSYSTEM('NDR_WINBIND',
+ 	source='gen_ndr/ndr_winbind.c',
+-	public_deps='ndr NDR_LSA'
++	public_deps='ndr NDR_LSA',
++	provide_builtin_linking=True
+ 	)
+ 
+ bld.SAMBA_SUBSYSTEM('RPC_NDR_WINBIND',
+diff --git a/source3/rpc_client/local_np.c b/source3/rpc_client/local_np.c
+index e66e375..d142d86 100644
+--- a/source3/rpc_client/local_np.c
++++ b/source3/rpc_client/local_np.c
+@@ -17,6 +17,30 @@
+ 
+ #include "source3/include/includes.h"
+ #include <spawn.h>
++#ifdef __APPLE__
++#include <TargetConditionals.h>
++#include <crt_externs.h>
++#ifndef TARGET_OS_IPHONE
++#define TARGET_OS_IPHONE 0
++#endif
++#ifndef TARGET_OS_TV
++#define TARGET_OS_TV 0
++#endif
++#ifndef TARGET_OS_WATCH
++#define TARGET_OS_WATCH 0
++#endif
++#ifndef TARGET_OS_VISION
++#define TARGET_OS_VISION 0
++#endif
++#ifndef TARGET_OS_MACCATALYST
++#define TARGET_OS_MACCATALYST 0
++#endif
++#define SAMBA_APPLE_NO_PROCESS_SPAWN \
++	(TARGET_OS_IPHONE || TARGET_OS_TV || TARGET_OS_WATCH || \
++	 TARGET_OS_VISION || TARGET_OS_MACCATALYST)
++#else
++#define SAMBA_APPLE_NO_PROCESS_SPAWN 0
++#endif
+ #include "local_np.h"
+ #include "lib/async_req/async_sock.h"
+ #include "librpc/gen_ndr/ndr_named_pipe_auth.h"
+@@ -337,7 +361,6 @@ static struct tevent_req *start_rpc_host_send(
+ 	int ret;
+ 	int ready_fds[2] = { -1, -1 };
+ 	char **argv = NULL;
+-	pid_t pid;
+ 	bool ok;
+ 
+ 	req = tevent_req_create(
+@@ -385,13 +408,23 @@ static struct tevent_req *start_rpc_host_send(
+ 		goto fail;
+ 	}
+ 
+-	become_root();
+-	ret = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
+-	unbecome_root();
+-	if (ret != 0) {
+-		DBG_DEBUG("posix_spawn() failed: %s\n", strerror(ret));
+-		goto fail;
+-	}
++#if SAMBA_APPLE_NO_PROCESS_SPAWN
++	ret = ENOTSUP;
++	DBG_DEBUG("posix_spawn() disabled on this Apple platform\n");
++	goto fail;
++#else
++	{
++		pid_t pid;
++
++		become_root();
++		ret = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
++		unbecome_root();
++		if (ret != 0) {
++			DBG_DEBUG("posix_spawn() failed: %s\n", strerror(ret));
++			goto fail;
++		}
++	}
++#endif
+ 
+ 	state->ready_fd = ready_fds[0];
+ 	ready_fds[0] = -1;
+diff --git a/source3/utils/wscript_build b/source3/utils/wscript_build
+index 007ec63..148ed40 100644
+--- a/source3/utils/wscript_build
++++ b/source3/utils/wscript_build
+@@ -362,7 +362,7 @@ bld.SAMBA3_BINARY('wspsearch',
+                  WSP_UTIL
+                  dcerpc
+                  ''',
+-                  enabled=bld.env.with_wsp)
++                  enabled=False)
+ 
+ pytalloc_util = bld.pyembed_libname('pytalloc-util')
+ pyrpc_util = bld.pyembed_libname('pyrpc_util')
+diff --git a/source4/librpc/wscript_build b/source4/librpc/wscript_build
+index 216b61e..53c00f4 100644
+--- a/source4/librpc/wscript_build
++++ b/source4/librpc/wscript_build
+@@ -7,7 +7,8 @@ bld.RECURSE('idl')
+ 
+ bld.SAMBA_SUBSYSTEM('NDR_IRPC',
+ 	source='gen_ndr/ndr_irpc.c',
+-	public_deps='ndr NDR_SECURITY ndr_nbt'
++	public_deps='ndr NDR_SECURITY ndr_nbt',
++	provide_builtin_linking=True
+ 	)
+ 
+ 
+@@ -26,7 +27,8 @@ bld.SAMBA_SUBSYSTEM('NDR_WINSIF',
+ 
+ bld.SAMBA_SUBSYSTEM('NDR_OPENDB',
+ 	source='gen_ndr/ndr_opendb.c',
+-	public_deps='ndr'
++	public_deps='ndr',
++	provide_builtin_linking=True
+ 	)
+ 
+ 
+@@ -130,7 +132,8 @@ bld.SAMBA_SUBSYSTEM('ndr-table',
+                     NDR_ODJ
+                     NDR_ADS
+                     ''',
+-        depends_on='GEN_NDR_TABLES'
++        depends_on='GEN_NDR_TABLES',
++        provide_builtin_linking=True
+         )
+ 
+ 
+diff --git a/source4/auth/gensec/wscript_build b/source4/auth/gensec/wscript_build
+index 2f975b1..071c4cc 100644
+--- a/source4/auth/gensec/wscript_build
++++ b/source4/auth/gensec/wscript_build
+@@ -26,7 +26,8 @@ bld.SAMBA_MODULE('gensec_gssapi',
+ 	source='gensec_gssapi.c',
+ 	subsystem='gensec',
+ 	init_function='gensec_gssapi_init',
+-	deps='gssapi samba-credentials authkrb5 com_err'
++	deps='gssapi samba-credentials authkrb5 com_err',
++	enabled=bld.AD_DC_BUILD_IS_ENABLED()
+ 	)
+ 
+ 
+diff --git a/source4/param/wscript_build b/source4/param/wscript_build
+index 8034136..eb39336 100644
+--- a/source4/param/wscript_build
++++ b/source4/param/wscript_build
+@@ -16,7 +16,8 @@ bld.SAMBA_SUBSYSTEM(name,
+ bld.SAMBA_SUBSYSTEM('share',
+ 	source='share.c',
+ 	public_headers='share.h',
+-	deps='samba-util samba-modules'
++	deps='samba-util samba-modules',
++	provide_builtin_linking=True
+ 	)
+ 
+ 
+diff --git a/third_party/heimdal_build/config.h b/third_party/heimdal_build/config.h
+index 7a43970..edd1228 100644
+--- a/third_party/heimdal_build/config.h
++++ b/third_party/heimdal_build/config.h
+@@ -15,6 +15,7 @@
+ #define VERSION "Samba"
+ 
+ #define PACKAGE VERSION
++#define PACKAGE_NAME VERSION
+ #define PACKAGE_BUGREPORT "https://bugzilla.samba.org/"
+ #define PACKAGE_VERSION VERSION
+ 
+diff --git a/third_party/heimdal_build/roken.h b/third_party/heimdal_build/roken.h
+index 4740a3d..80036db 100644
+--- a/third_party/heimdal_build/roken.h
++++ b/third_party/heimdal_build/roken.h
+@@ -6,6 +6,9 @@
+ 
+ #include "config.h"
+ 
++/* Darwin SDKs do not expose secure_getenv(), so use Heimdal's wrapper. */
++#undef HAVE_SECURE_GETENV
++
+ /* path to sysconf - should we force this to samba LIBDIR ? */
+ #define SYSCONFDIR "/etc"
+ 
+diff --git a/third_party/heimdal_build/wscript_build b/third_party/heimdal_build/wscript_build
+index ebbf943..2aa0b7a 100644
+--- a/third_party/heimdal_build/wscript_build
++++ b/third_party/heimdal_build/wscript_build
+@@ -93,7 +93,7 @@ def HEIMDAL_ASN1(name, source,
+     t.env.ASN1OPTIONS  = options
+     t.env.BLDBIN       = os.path.normpath(os.path.join(bld.srcnode.abspath(bld.env), '..'))
+     if option_file is not None:
+-        t.env.OPTION_FILE = "--option-file='%s'" % \
++        t.env.OPTION_FILE = "--option-file=%s" % \
+             os.path.normpath(os.path.join(bld.path.abspath(), option_file))
+ 
+     cfile = out_files[0]
+diff --git a/wscript_build b/wscript_build
+index b4b115e..4f9ad57 100644
+--- a/wscript_build
++++ b/wscript_build
+@@ -20,6 +20,7 @@ bld.env.build_public_headers = 'include/public'
+ # these are includes which appear in public headers, but with #ifdef conditional
+ # compilation, so they are safe
+ bld.env.public_headers_skip = ['lib/param/param_proto.h', 'lib/param/param_functions.h']
++bld.env.public_headers_allow_broken = True
+ 
+ version=samba_version.load_version(bld.env, is_install=bld.is_install)
+ bld.SAMBA_MKVERSION('version.h')
+@@ -161,4 +162,3 @@ bld.RECURSE('testsuite/headers')
+ 
+ bld.SYMBOL_CHECK()
+ bld.DUP_SYMBOL_CHECK()
+-
