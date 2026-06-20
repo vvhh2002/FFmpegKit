@@ -38,7 +38,7 @@ let package = Package(
         .target(
             name: "FFmpegKit",
             dependencies: [
-                "MoltenVK",
+                .target(name: "MoltenVK", condition: .when(platforms: [.macOS, .iOS, .tvOS, .visionOS])),
                 "libshaderc_combined",
                 "lcms2",
                 "libdav1d",

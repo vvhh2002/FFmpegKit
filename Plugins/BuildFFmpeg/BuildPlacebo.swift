@@ -31,6 +31,10 @@ class BuildVulkan: BaseBuild {
         super.init(library: .vulkan)
     }
 
+    private var staticXCFrameworkURL: URL {
+        directoryURL + "Package/Release/MoltenVK/static/MoltenVK.xcframework"
+    }
+
     private var deploymentTargetEnvironment: [String: String] {
         [
             "IPHONEOS_DEPLOYMENT_TARGET": PlatformType.ios.minVersion,
@@ -54,6 +58,7 @@ class BuildVulkan: BaseBuild {
     }
 
     override func buildALL() throws {
+        try patchMoltenVKBuildFiles()
         var arguments = platforms().map {
             "--\($0.name)"
         }
@@ -61,13 +66,26 @@ class BuildVulkan: BaseBuild {
         if !FileManager.default.fileExists(atPath: (directoryURL + "External/build/Release").path) {
             try Utility.launch(path: (directoryURL + "fetchDependencies").path, arguments: arguments, currentDirectoryURL: directoryURL, environment: environment)
         }
-        arguments = platforms().map(\.name)
-        arguments.append(contentsOf: deploymentTargetMakeArguments)
-        if !FileManager.default.fileExists(atPath: (directoryURL + "Package/Release/MoltenVK/static/MoltenVK.xcframework").path) || !BaseBuild.notRecompile {
-            try Utility.launch(path: "/usr/bin/make", arguments: arguments, currentDirectoryURL: directoryURL, environment: environment)
+        if !FileManager.default.fileExists(atPath: staticXCFrameworkURL.path) || !BaseBuild.notRecompile {
+            for platform in platforms() {
+                arguments = [platform.name]
+                arguments.append(contentsOf: deploymentTargetMakeArguments)
+                do {
+                    try Utility.launch(path: "/usr/bin/make", arguments: arguments, currentDirectoryURL: directoryURL, environment: environment)
+                } catch {
+                    if hasUsableStaticXCFramework() {
+                        print("MoltenVK static xcframework is usable; continuing after package target failure: \(error)")
+                    } else {
+                        throw error
+                    }
+                }
+            }
+        }
+        guard hasUsableStaticXCFramework() else {
+            throw NSError(domain: "BuildFFmpeg", code: 1, userInfo: [NSLocalizedDescriptionKey: "MoltenVK static xcframework is missing required platform slices"])
         }
         try? FileManager.default.removeItem(at: URL.currentDirectory() + "../Sources/MoltenVK.xcframework")
-        try? FileManager.default.copyItem(at: directoryURL + "Package/Release/MoltenVK/static/MoltenVK.xcframework", to: URL.currentDirectory() + "../Sources/MoltenVK.xcframework")
+        try? FileManager.default.copyItem(at: staticXCFrameworkURL, to: URL.currentDirectory() + "../Sources/MoltenVK.xcframework")
         for platform in platforms() {
             var frameworks = ["CoreFoundation", "CoreGraphics", "Foundation", "IOSurface", "Metal", "QuartzCore"]
             if platform == .macos {
@@ -101,6 +119,40 @@ class BuildVulkan: BaseBuild {
                 FileManager.default.createFile(atPath: vulkanPC.path, contents: content.data(using: .utf8), attributes: nil)
             }
         }
+    }
+
+    private func patchMoltenVKBuildFiles() throws {
+        let makefile = directoryURL + "Makefile"
+        if let data = FileManager.default.contents(atPath: makefile.path), var content = String(data: data, encoding: .utf8) {
+            let original = "GCC_PREPROCESSOR_DEFINITIONS='$${inherited} $(MAKEARGS)' $(OUTPUT_FMT_CMD)"
+            let replacement = "$(MAKEARGS) GCC_PREPROCESSOR_DEFINITIONS='$${inherited} $(MAKEARGS)' $(OUTPUT_FMT_CMD)"
+            if content.contains(original), !content.contains(replacement) {
+                content = content.replacingOccurrences(of: original, with: replacement)
+                try content.write(to: makefile, atomically: true, encoding: .utf8)
+            }
+        }
+
+        let project = directoryURL + "MoltenVK/MoltenVK.xcodeproj/project.pbxproj"
+        if let data = FileManager.default.contents(atPath: project.path), var content = String(data: data, encoding: .utf8) {
+            content = content
+                .replacingOccurrences(of: "IPHONEOS_DEPLOYMENT_TARGET = 13.0;", with: "IPHONEOS_DEPLOYMENT_TARGET = \(PlatformType.ios.minVersion);")
+                .replacingOccurrences(of: "MACOSX_DEPLOYMENT_TARGET = 10.15;", with: "MACOSX_DEPLOYMENT_TARGET = \(PlatformType.macos.minVersion);")
+                .replacingOccurrences(of: "TVOS_DEPLOYMENT_TARGET = 13.0;", with: "TVOS_DEPLOYMENT_TARGET = \(PlatformType.tvos.minVersion);")
+            try content.write(to: project, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func hasUsableStaticXCFramework() -> Bool {
+        let infoPlist = staticXCFrameworkURL + "Info.plist"
+        guard let data = FileManager.default.contents(atPath: infoPlist.path),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let availableLibraries = plist["AvailableLibraries"] as? [[String: Any]]
+        else {
+            return false
+        }
+        let availableIdentifiers = Set(availableLibraries.compactMap { $0["LibraryIdentifier"] as? String })
+        let requiredIdentifiers = Set(platforms().map(\.frameworkName))
+        return requiredIdentifiers.isSubset(of: availableIdentifiers)
     }
 }
 

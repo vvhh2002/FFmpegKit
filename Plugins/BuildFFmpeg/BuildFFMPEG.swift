@@ -187,6 +187,16 @@ class BuildFFMPEG: BaseBuild {
                 try string.write(toFile: file.path, atomically: true, encoding: .utf8)
             }
 
+            func patchFFmpegToolSymbols(in file: URL) throws {
+                guard let data = FileManager.default.contents(atPath: file.path),
+                      var string = String(data: data, encoding: .utf8),
+                      string.contains("dec_init") else {
+                    return
+                }
+                string = string.replacingOccurrences(of: "dec_init", with: "ffmpeg_dec_init")
+                try string.write(toFile: file.path, atomically: true, encoding: .utf8)
+            }
+
             func patchFFplayRenderer(in file: URL) throws {
                 guard let data = FileManager.default.contents(atPath: file.path),
                       var string = String(data: data, encoding: .utf8),
@@ -223,10 +233,13 @@ class BuildFFMPEG: BaseBuild {
                     let target = targetDirectory + fileName
                     try FileManager.default.copyItem(at: sourceDirectory + fileName, to: target)
                     try patchFFmpegToolIncludes(in: target)
+                    try patchFFmpegToolSymbols(in: target)
                 }
                 if let generatedSource, FileManager.default.fileExists(atPath: generatedSource.path) {
                     for fileName in try FileManager.default.contentsOfDirectory(atPath: generatedSource.path) where fileName.hasSuffix(".c") {
-                        try FileManager.default.copyItem(at: generatedSource + fileName, to: targetDirectory + fileName)
+                        let target = targetDirectory + fileName
+                        try FileManager.default.copyItem(at: generatedSource + fileName, to: target)
+                        try patchFFmpegToolSymbols(in: target)
                     }
                 }
             }
@@ -240,11 +253,14 @@ class BuildFFMPEG: BaseBuild {
                 } else if fileName.hasPrefix("ffprobe") {
                     try FileManager.default.copyItem(at: fftools + fileName, to: ffprobeFile + fileName)
                 } else if fileName.hasPrefix("ffmpeg") {
+                    let target: URL
                     if fileName.hasSuffix(".h") {
-                        try FileManager.default.copyItem(at: fftools + fileName, to: ffmpegFile + "include" + fileName)
+                        target = ffmpegFile + "include" + fileName
                     } else {
-                        try FileManager.default.copyItem(at: fftools + fileName, to: ffmpegFile + fileName)
+                        target = ffmpegFile + fileName
                     }
+                    try FileManager.default.copyItem(at: fftools + fileName, to: target)
+                    try patchFFmpegToolSymbols(in: target)
                 } else if fileName.hasSuffix(".h") {
                     try FileManager.default.copyItem(at: fftools + fileName, to: fftoolsFile + "include" + fileName)
                 } else if fileName.hasSuffix(".c") {

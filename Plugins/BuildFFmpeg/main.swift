@@ -485,7 +485,7 @@ class BaseBuild {
                 "-DCMAKE_INSTALL_PREFIX=\(thinDirPath)",
                 "-DBUILD_SHARED_LIBS=0",
             ]
-            if platform != .android {
+            if platform != .android, platform != .maccatalyst {
                 arguments.append("-DCMAKE_OSX_DEPLOYMENT_TARGET=\(platform.minVersion)")
             }
             arguments.append(contentsOf: self.arguments(platform: platform, arch: arch))
@@ -712,7 +712,8 @@ class BaseBuild {
     }
 
     private func createPlist(path: String, name: String, minVersion: String, platform: String) {
-        let identifier = "com.ioncreate.vsplayer." + name
+        let bundleName = name.replacingOccurrences(of: "_", with: "-")
+        let identifier = "com.ioncreate.vsplayer." + bundleName
         let content = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
